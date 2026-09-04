@@ -1,0 +1,28 @@
+# --extra-index-url adds Intel's PyTorch index alongside regular PyPI. Needed
+# specifically for the two lines below — plain PyPI does not host the +xpu
+# build, so without this, `pip install -r requirements.txt` would either fail
+# to find torch==2.14.0+xpu at all, or a bare `pip install torch` elsewhere in
+# the chain would silently resolve to the CPU-only build instead (the exact
+# bug that cost a full venv rebuild once already — see git history / INFO.md).
+--extra-index-url https://download.pytorch.org/whl/xpu
+
+# scripts 1-4: classical CV pipeline. -headless, not opencv-python: nothing
+# here calls imshow/waitKey, and roboflow (below) hard-depends on headless
+# anyway — pinning plain opencv-python instead installs *both* packages side
+# by side, which silently corrupts the cv2 install (they ship overlapping
+# files under the same cv2/ folder).
+opencv-python-headless==5.0.0.93
+numpy==2.3.5
+
+# scripts 5-7 + prepare_bullet_dataset.py: Roboflow-hosted models and dataset download
+roboflow==1.4.2
+python-dotenv==1.2.3
+PyYAML==6.0.3
+
+# script 8, train_yolo26.py, resume_yolo26.py: local YOLO26 training/inference
+ultralytics==8.4.138
+
+# pinned explicitly rather than left to ultralytics' own resolution — see the
+# --extra-index-url comment above for why this matters on this machine
+torch==2.14.0+xpu
+torchvision==0.29.0+xpu
