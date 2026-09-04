@@ -7,7 +7,7 @@ from ultralytics import YOLO
 # resume=True also reads args.yaml from the same run/ folder automatically, so
 # data/epochs/batch/device etc. don't need to be repeated here.
 OUTPUT_DIR = os.path.abspath('Playground/output/yolo26_training')
-LAST_CHECKPOINT = f'{OUTPUT_DIR}/run/weights/last.pt'
+LAST_CHECKPOINT = f'{OUTPUT_DIR}/run_v30/weights/last.pt'
 
 model = YOLO(LAST_CHECKPOINT)
 model.train(resume=True)

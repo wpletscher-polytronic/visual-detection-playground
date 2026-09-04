@@ -4,11 +4,11 @@ from ultralytics import YOLO
 
 IMAGES_DIR = 'Playground/data/images'
 EXAMPLES_DIR = IMAGES_DIR + '/examples'
-OUTPUT_DIR = 'Playground/output/yolo26_detection'
+OUTPUT_DIR = 'Playground/output/yolo26_detection_v30'
 
 # Our own model — YOLO26s fine-tuned on the cleaned Project bat dataset via
 # prepare_bullet_dataset.py + train_yolo26.py. Runs locally, no API involved.
-WEIGHTS = 'Playground/output/yolo26_training/run/weights/best.pt'
+WEIGHTS = 'Playground/output/yolo26_training/run_v30/weights/best.pt'
 
 CONFIDENCE = 0.40   # drop predictions below this score
 IOU = 0.30          # NMS IoU threshold

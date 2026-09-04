@@ -8,21 +8,35 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # "Bullet hole object detection" by Project bat — the Butt et al. 2023 paper's
-# own dataset (13 classes: ring scores Bullet_1..Bullet_10 plus Target), ~1243
-# source images before augmentation.
+# own dataset (13 classes: ring scores Bullet_1..Bullet_10 plus Target).
 #   https://universe.roboflow.com/project-bat-bullet-hole-detection/bullet-hole-object-detection
+#
+# v12 (used for the first training run) is a Feb-2023 snapshot: 131 source
+# images. v30's split (2784/202/113 after augmentation, 928 train source
+# images) matches the paper's own reported figures almost exactly, so this is
+# very likely the actual dataset the published 96.7% mAP50 was measured on —
+# separate raw/clean dirs from v12 so neither download overwrites the other.
 API_KEY = os.environ['ROBOFLOW_API_KEY']
 WORKSPACE = 'project-bat-bullet-hole-detection'
 PROJECT = 'bullet-hole-object-detection'
-VERSION = 12
+VERSION = 30
 
-RAW_DIR = 'Playground/data/datasets/bullet_holes/raw'
-CLEAN_DIR = 'Playground/data/datasets/bullet_holes/clean'
+RAW_DIR = f'Playground/data/datasets/bullet_holes/raw_v{VERSION}'
+CLEAN_DIR = f'Playground/data/datasets/bullet_holes/clean_v{VERSION}'
 SPLITS = ('train', 'valid', 'test')
 
 # We only want a plain hole detector: every ring-score class becomes one
-# 'bullet_hole' class, and every Target-face box is dropped entirely.
-HOLE_CLASS_PREFIX = 'Bullet'
+# 'bullet_hole' class, and every Target-face / contour-outline box is dropped.
+#
+# Matched by exclusion (NOT non-hole), not by a 'Bullet' prefix: Roboflow's own
+# per-version "remap" preprocessing renames classes across versions — v12 uses
+# Bullet_1..Bullet_10, v30 strips that down to bare '0'..'10' plus a new
+# black_contour class. A prefix match silently breaks the moment the naming
+# changes (confirmed: it dropped all 3099 v30 images' boxes before this fix,
+# since none of them start with 'Bullet' any more). Excluding known non-hole
+# names is robust to that; anything not explicitly a target/contour class is
+# treated as a hole regardless of what it happens to be called.
+NON_HOLE_CLASSES = {'Target', 'black_contour'}
 HOLE_CLASS_NAME = 'bullet_hole'
 
 
@@ -85,8 +99,8 @@ def copy_clean_split(skip):
 
 
 def rewrite_labels(class_names):
-    """Collapse every Bullet_* class to id 0, drop every Target line."""
-    old_to_new = {i: (0 if name.startswith(HOLE_CLASS_PREFIX) else None)
+    """Collapse every hole class to id 0, drop every Target/contour line."""
+    old_to_new = {i: (None if name in NON_HOLE_CLASSES else 0)
                   for i, name in enumerate(class_names)}
 
     empty_count = 0
