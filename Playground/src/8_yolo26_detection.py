@@ -4,11 +4,15 @@ from ultralytics import YOLO
 
 IMAGES_DIR = 'Playground/data/images'
 EXAMPLES_DIR = IMAGES_DIR + '/examples'
-OUTPUT_DIR = 'Playground/output/yolo26_detection_v30'
+OUTPUT_DIR = 'Playground/output/yolo26_detection_v30_colab'
 
 # Our own model — YOLO26s fine-tuned on the cleaned Project bat dataset via
-# prepare_bullet_dataset.py + train_yolo26.py. Runs locally, no API involved.
-WEIGHTS = 'Playground/output/yolo26_training/run_v30/weights/best.pt'
+# prepare_bullet_dataset.py + train_yolo26.py. Trained on Colab (see
+# run_v30_colab), not locally — the local run_v30 was stopped early at epoch
+# 16/20 once Colab proved faster, so it's a strictly worse, superseded partial
+# run; this Colab checkpoint is the properly patience-converged one (best at
+# epoch 36/44, higher mAP50-95 than either earlier run).
+WEIGHTS = 'Playground/output/yolo26_training/run_v30_colab/weights/best.pt'
 
 CONFIDENCE = 0.40   # drop predictions below this score
 IOU = 0.30          # NMS IoU threshold

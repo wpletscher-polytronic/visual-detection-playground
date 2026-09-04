@@ -53,6 +53,15 @@ There are only a handful models trained on 100-200 images. Therefore quality is 
 -> create our own instance segmentation data set?
 
 
+7. TRAINING OUR OWN YOLO26 MODEL WITH EXISTING DATASET
+We used yolo26 on the project bat dataset (see paper). They used yolov8 and we use yolo26.
+This was a test, whether the new models are much better than the old (2023) models.
+- old mAP50: 96.5% our mAP: 99.3% 
+- performance was noticeably better with the new version
+- generalization to our examples were still bad
+
+
+
 
 OTHER OPTIONS:
 - scikit-image blob detectors (LoG/DoG)
