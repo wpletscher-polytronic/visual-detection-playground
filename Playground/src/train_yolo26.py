@@ -3,7 +3,7 @@ from ultralytics import YOLO
 
 # v30: 928 source images (2784 after augmenting train only) vs v12's 131 —
 # see RESEARCH.md / the redness analysis for why this version specifically.
-DATA_YAML = 'Playground/data/datasets/bullet_holes/clean_v30/data.yaml'
+DATA_YAML = 'datasets/bullet_holes/clean_v30/data.yaml'
 # Ultralytics silently nests a relative `project=` path under its own global
 # runs/ folder (~/AppData/Roaming/Ultralytics/settings.json's runs_dir),
 # instead of the path you actually gave it — abspath sidesteps that entirely.

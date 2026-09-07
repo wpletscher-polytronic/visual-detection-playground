@@ -2,8 +2,7 @@ import cv2
 import os
 import numpy as np
 
-IMAGES_DIR = 'Playground/data/images'
-EXAMPLES_DIR = IMAGES_DIR + '/examples'
+EXAMPLES_DIR = 'datasets/examples'
 OUTPUT_DIR = 'Playground/output/blob_detection'
 
 
@@ -34,7 +33,7 @@ def get_detector():
 
 
 def segment(img_name, detector):
-    img = cv2.imread(IMAGES_DIR + '/examples/' + img_name)
+    img = cv2.imread(EXAMPLES_DIR + '/' + img_name)
 
     if img is None:
         print(f"Skipping {img_name} — could not load as image")

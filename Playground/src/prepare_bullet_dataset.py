@@ -21,8 +21,8 @@ WORKSPACE = 'project-bat-bullet-hole-detection'
 PROJECT = 'bullet-hole-object-detection'
 VERSION = 30
 
-RAW_DIR = f'Playground/data/datasets/bullet_holes/raw_v{VERSION}'
-CLEAN_DIR = f'Playground/data/datasets/bullet_holes/clean_v{VERSION}'
+RAW_DIR = f'datasets/bullet_holes/raw_v{VERSION}'
+CLEAN_DIR = f'datasets/bullet_holes/clean_v{VERSION}'
 SPLITS = ('train', 'valid', 'test')
 
 # We only want a plain hole detector: every ring-score class becomes one

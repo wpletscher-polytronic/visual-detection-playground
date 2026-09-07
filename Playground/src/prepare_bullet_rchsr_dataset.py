@@ -25,8 +25,8 @@ WORKSPACE = 'cdmstrong-iocyj'
 PROJECT = 'bullet-rchsr'
 VERSION = 1
 
-RAW_DIR = 'Playground/data/datasets/bullet_rchsr/raw'
-CLEAN_DIR = 'Playground/data/datasets/bullet_rchsr/clean'
+RAW_DIR = 'datasets/bullet_rchsr/raw'
+CLEAN_DIR = 'datasets/bullet_rchsr/clean'
 SPLITS = ('train', 'valid', 'test')
 
 # Already just one class, so nothing needs excluding — kept as a set (not

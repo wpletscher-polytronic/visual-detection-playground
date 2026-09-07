@@ -8,8 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-IMAGES_DIR = 'Playground/data/images'
-EXAMPLES_DIR = IMAGES_DIR + '/examples'
+EXAMPLES_DIR = 'datasets/examples'
 OUTPUT_DIR = 'Playground/output/roboflow_detection'
 
 # "bullet" by cdmstrong on Roboflow Universe — ~3.4k images, one class.
@@ -32,7 +31,7 @@ def find_holes(img_name):
     Uses urllib rather than the inference-sdk so the script needs nothing beyond
     what the other scripts already use — that package has no Python 3.14 wheel.
     """
-    with open(IMAGES_DIR + '/examples/' + img_name, 'rb') as handle:
+    with open(EXAMPLES_DIR + '/' + img_name, 'rb') as handle:
         payload = base64.b64encode(handle.read())
 
     query = urllib.parse.urlencode({
@@ -54,7 +53,7 @@ def find_holes(img_name):
 
 
 def detect(img_name):
-    img = cv2.imread(IMAGES_DIR + '/examples/' + img_name)
+    img = cv2.imread(EXAMPLES_DIR + '/' + img_name)
     holes = find_holes(img_name)
     print(f"{img_name:36s} {len(holes):2d} holes")
 

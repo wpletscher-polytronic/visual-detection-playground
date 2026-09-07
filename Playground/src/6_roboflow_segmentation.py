@@ -9,8 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-IMAGES_DIR = 'Playground/data/images'
-EXAMPLES_DIR = IMAGES_DIR + '/examples'
+EXAMPLES_DIR = 'datasets/examples'
 OUTPUT_DIR = 'Playground/output/roboflow_segmentation'
 
 # "bullet" segmentation by Roboflow Universe — returns polygons, not boxes.
@@ -37,7 +36,7 @@ def find_holes(img_name, shape):
     The model gives one polygon per hole, so the circle comes from the polygon's
     minimum enclosing circle — the same step script 4 applies to its contours.
     """
-    with open(IMAGES_DIR + '/examples/' + img_name, 'rb') as handle:
+    with open(EXAMPLES_DIR + '/' + img_name, 'rb') as handle:
         payload = base64.b64encode(handle.read())
 
     query = urllib.parse.urlencode({
@@ -71,7 +70,7 @@ def find_holes(img_name, shape):
 
 
 def detect(img_name):
-    img = cv2.imread(IMAGES_DIR + '/examples/' + img_name)
+    img = cv2.imread(EXAMPLES_DIR + '/' + img_name)
     holes, mask = find_holes(img_name, img.shape)
     print(f"{img_name:36s} {len(holes):2d} holes")
 

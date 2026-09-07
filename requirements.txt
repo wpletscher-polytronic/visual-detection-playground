@@ -26,3 +26,6 @@ ultralytics==8.4.138
 # --extra-index-url comment above for why this matters on this machine
 torch==2.14.0+xpu
 torchvision==0.29.0+xpu
+
+# centerpoint unit tests (Tier 2 correctness gates). Pure python, no XPU/CUDA involvement.
+pytest==9.1.1
