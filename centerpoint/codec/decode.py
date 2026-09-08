@@ -6,7 +6,7 @@ replaces box-IoU suppression, and why two touching holes stay two detections.
 
 import numpy as np
 
-from centerpoint.codec.encode import STRIDE
+from centerpoint.params import STRIDE
 
 SCORE_THRESHOLD = 0.3
 

@@ -16,6 +16,8 @@ Explicitly NOT "beats YOLO on dense clusters" — see Motivation.
   Consequence: never paste AGPL code in, and keep the MIT attribution notice on anything
   derived from the reference implementations.
 - NOT because NMS demonstrably fails. That diagnosis was dropped unmeasured (see Phases).
+  And YOLO26 is NMS-free by default anyway — its one-to-one head emits final detections
+  directly — so avoiding NMS is no advantage over this particular baseline.
 
 ## Environment (verified, not assumed)
 - torch 2.14.0+xpu, torchvision 0.29.0. `torch.cuda.is_available()` is **False**.
@@ -51,16 +53,27 @@ Tier 3 — delegate:
 1. ~~**Measure the data first.**~~ **DONE** — `centerpoint/analyze_labels.py`,
    results in `centerpoint/outputs/debug/label_stats/<dataset>/stats.json`.
    See "Step 1 results" below.
-2. Config + dataset. Boxes -> (center, radius), same splits as the baseline.
-3. ~~Target encoding.~~ **DONE** — `codec/encode.py`, 18 tests green.
-4. Decode. Steps 1-4 need numpy and cv2 only — no torch, no GPU.
-5. Model: backbone + decoder + heads. Shapes and sanity only.
+2. ~~Config.~~ **DONE** — split into `paths.py` (where things are) and `params.py`
+   (values two modules must agree on: STRIDE, IMG_SIZE). The torch Dataset moved to 5.5,
+   because encode and decode need no images.
+3. ~~Target encoding.~~ **DONE** — `codec/encode.py`.
+4. ~~Decode.~~ **DONE** — `codec/decode.py`. 34 tests, green at strides 1 to 20.
+   Steps 1-4 are numpy and cv2 only — no torch, no GPU.
+5. Model: backbone + neck + heads. Shapes and sanity only. See "Step 5 design" below.
+5.5 Dataset + collate, once training needs batches of real images.
+5.7 ~~**Perturbation tests before any training.**~~ **DONE** — see results below. Every check so far uses ideal targets,
+   where the peak is always in the right cell. Feed decode heatmaps with unequal peaks,
+   sub-cell shifts and noise, and see what survives. This is the only way to learn what
+   the decoder does with realistic input, and it settles the stride question properly.
 6. Losses, then **overfit 8 images to near-zero loss**. Hard gate.
 7. First full training run. Point metrics only, no radius yet.
 8. Radius head.
-9. Eval harness + YOLO26 comparison — as a **bug detector**, not a competition. Scoring far
-   below the baseline means a defect in encode/decode, not a paradigm difference.
-10. Backbone ladder: plain decoder -> U-Net skips -> HRNet-W18 (timm). One change at a time.
+9. Eval harness + YOLO26 comparison — a **signal**, not an oracle. A large gap is a reason
+   to go looking, but initialisation, training recipe, capacity, augmentation and label
+   noise can all explain one. It does not prove an encode/decode defect.
+10. Capacity ladder, in this order: **neck design -> stride -> input resolution -> backbone
+    size**. A bigger backbone will not fix small holes — ResNet-18/34/50 share an identical
+    downsampling schedule, so capacity and resolution are orthogonal. One change at a time.
 11. Write results into `INFO.md` section 9.
 
 Steps 1-4 are one or two sittings and need no GPU.
@@ -145,21 +158,16 @@ Reproduce with `python -m centerpoint.analyze_labels`.
 - valid and test agree with train, so the splits are consistent.
 
 What this means
-- The collision number understates the risk by roughly 60x. At stride 4, 11.7% of holes
-  have a neighbour within 2 cells and would merge under any sigma large enough to train.
-  Stride 2 cuts that to 1.45%. The hard limit was never the binding constraint.
+- The collision number understates the risk, but the 2-cell figure overstates it. A 3x3
+  peak window only suppresses a neighbour within **1 cell**: that is 1.45% at stride 4 and
+  0.03% at stride 2. The 11.74%-within-2-cells figure is holes whose target valley is
+  shallow (0.73), which a model *may* fail to reproduce — a hypothesis, not a measurement.
+  Establish it with the perturbation tests (phase 5.7) before treating it as fact.
 - Holes are small: a quarter are under 0.75 cells radius at stride 4. Sigma would have to
   be ~1 cell, which a heatmap can barely represent.
 - Evidence leans stride 2. Cost is 4x head memory (320x320 vs 160x160). Still your call.
 - Radius p1 is 1 px and p5 is 2 px — a 2 px-diameter hole at 640x640 may be annotation
   noise. Overlays confirm the parse is right, so these are real labels, not a bug.
-
-## Unit tests to write first (they are the learning device)
-- encode a known point/radius -> argmax at that pixel, value exactly 1.0
-- encode -> decode round-trips to sub-pixel tolerance
-- two points 3 px apart survive as two peaks; 1 px apart merge
-  (this pins the sigma/stride trade-off numerically instead of by intuition)
-- focal loss ~0 on a perfect prediction, large on an inverted one
 
 ## Decided
 - Success is parity with the baseline plus full understanding and no AGPL, not a win.
@@ -170,7 +178,7 @@ What this means
 - Modernize the scaffolding (AMP, AdamW + cosine, albumentations, no DCN compilation).
   Do NOT modernize the math until a faithful baseline trains.
 
-## Decided at Step 3 (constants live in `codec/encode.py`)
+## Decided at Step 3 (STRIDE and IMG_SIZE in `params.py`, the rest in `codec/encode.py`)
 - **Stride 2.** Holes with a neighbour within 2 cells: 11.74% at stride 4, 1.45% at
   stride 2. Radius p25 goes 0.75 -> 1.50 cells. Costs 4x head memory (320x320 grid).
 - **`sigma = max(0.5 * radius_cells, 1.0)`.** Follows hole size but never below one cell:
@@ -189,18 +197,155 @@ merges in the encoder. What varies is whether a dip exists *between* them:
 - 1 cell apart: two 1.0 cells, **no cell between them**, i.e. a flat 2-cell plateau.
 - 2+ cells apart: a real valley (0.73 at 2 cells, 0.28 at 4).
 
-So ~1.4% of holes at stride 2 land in the plateau regime, and whether those decode as one
-detection or two is decided entirely by the plateau rule in `codec/decode.py`. That rule
-is now the single most important decision left.
+So ~1.4% of holes at stride 2 land in the plateau regime. **Decided: ties are kept**
+(`==`, not `>`) — a strict comparison would find neither of two equal adjacent cells
+greater than the other and drop both. Verified: 1.5, 2 and 3 cells apart all decode as two.
+
+Caveat for inference. That holds for *encoded* targets, where both cells are exactly 1.0.
+A trained model will rarely tie, so one of two adjacent peaks will be marginally lower and
+lose the 3x3 comparison. The max-pool window is measured in cells, so the minimum
+resolvable separation is +/- 1 cell — another reason the window size is a parameter to
+think about, not just the stride.
 
 ## Open decisions — yours, not mine
-- **Plateau rule in decode**: on a tie between adjacent cells, keep all or keep one.
-  Directly sets whether the ~1.4% plateau cases become one detection or two.
+- Radius representation for the head: linear in cells (decided at Step 3) or log(radius).
+  Log makes errors proportional, so a 1 px error on a 5 px hole weighs as much as a 20 px
+  error on a 100 px one. Note the usual justification is wrong under L1: d|x|/dx is +/-1
+  regardless of magnitude, so large holes do *not* dominate the gradient. Changes decode.
+- Sigma when the stride changes. Note the algebra first: physical sigma is
+  `max(0.5 * r_px, stride)`, so the *scaled* term has no stride in it. Halving the stride
+  narrows only the holes sitting at the floor — 76% of them at stride 4, but 35% at
+  stride 2. "Halving stride halves the bumps" is false for the majority.
 - Radius loss: L1 (CircleNet), smooth-L1, or a cIoU/gCIoU regression loss.
 - Match threshold for the point metric: absolute px, fraction of GT radius, or k-NN
   normalised (nAP). This defines what "correct" means for the whole project.
 - Ellipse vs circle for perspective-distorted holes.
 - Whether to filter tiny boxes (p1 radius 1 px, p5 2 px).
+
+## Step 5 design (measured, before writing any of it)
+
+- **Bilinear upsample + 3x3 conv, not ConvTranspose2d.** Transposed convolution makes
+  periodic checkerboard artefacts when the kernel is not divisible by the stride (Odena
+  et al., Distill 2016). CenterNet dodges it with kernel 4 stride 2. For us the risk is
+  not cosmetic: decode finds local maxima, so a periodic artefact manufactures spurious
+  peaks at regular intervals.
+- **Taper the neck width per level.** One 3x3 conv 64->64 at 320x320 is 3.77 GMACs, about
+  a whole ResNet-18 stage (~3.7 GMACs). At 32 channels it is 0.94. The finest level wants
+  position, not semantics.
+- **Radius head is linear, never ReLU.** A ReLU unit that goes negative outputs zero and
+  gets zero gradient forever — a dead radius that cannot recover. CenterNet uses a linear
+  size head with L1 for this reason.
+- **Sigmoid on the heatmap lives in exactly one place**, the layer or the loss. In both, it
+  trains plausibly and is quietly wrong.
+- **Expose the stem** (after relu, before maxpool). ResNet's finest residual output is
+  stride 4, so stride 2 needs it. Taking it one line later silently gives stride 4 back
+  with no error.
+- **Develop at stride 4, switch to 2 for real runs.** The stride-2 output map is 4x the
+  activations (210 MB vs 52 MB, 64 channels at batch 8) and the debug loop runs dozens of
+  times. Same pattern as developing on v30 and targeting rchsr. Verified switchable: the
+  codec is green at strides 1 to 20.
+- **The loss balance shifts with stride.** Stride 4 -> 2 takes positives to negatives from
+  roughly 1:2,600 to 1:10,200 at the same hole count. If training behaves differently after
+  a stride change, check the loss-term magnitudes before suspecting the architecture.
+- **BatchNorm behaves differently in train and eval mode**, and ResNet-18 is full of it.
+  Eight correlated images give unreliable running statistics, so the overfit gate can look
+  good in train mode and much worse in eval. Check both. Freezing the pretrained BN
+  statistics is an experiment to run if needed, not a default. Gradient accumulation does
+  not help — BN never sees the larger batch.
+- Backbone forward at 640x640 on this machine's XPU: 32 ms.
+
+## The near-miss geometry problem (found in review, not yet addressed)
+
+offset and radius are supervised **only at the exact ground-truth centre cell**; every
+other cell holds zero and receives no gradient for that object. So if the model's peak
+lands one cell off, decode reads geometry from a cell that was never trained.
+
+Measured on a hole at (100.3, 200.7) with r = 9, forcing the peak one cell sideways:
+
+    decoded  [100.0  198.0   0.0]
+    truth    [100.3  200.7   9.0]
+    centre error 2.72 px, radius error 9.00 px
+
+The radius decodes to **zero**. A 100% error from a heatmap that was nearly right.
+
+This is inherent to the CenterNet arrangement, not a bug in our code — the reference
+supervises regression at centre locations too. What matters is that **no test we have can
+see it**: the exact round trip, the 34 unit tests and inspect_codec all use ideal targets
+where the peak is always in the correct cell.
+
+### Measured by the phase 5.7 sweep, and there is a clean fix
+
+Densest v30 image, 13 holes, whole-bump shifts:
+
+    shift    stride 4 radius err    stride 2 radius err
+      0            0.00 px               0.00 px
+      1           11.75 px              11.75 px
+      2           11.75 px              11.75 px
+
+In this synthetic test a finer stride halves the centre error (3.04 -> 1.41 px) and
+leaves the radius equally destroyed. It does not follow that stride never helps in
+practice: how often a trained model misses by a whole cell, and whether that rate depends
+on stride, is unmeasured.
+
+Spreading each centre's offset and radius into a 3x3 block before decoding:
+
+    spread   stride 4 radius err    stride 2 radius err
+      0           11.75 px              11.75 px
+      1            0.00 px               0.00 px
+
+**It fixes the radius. It does NOT fix the centre**, and copying offsets makes the centre
+worse: 1.50 px error without spreading, 2.00 px with. An offset is measured from its own
+cell, so cell `col+1` needs `x - (col+1)`, not the copied `x - col`. Getting this right
+means recomputing signed offsets per cell — the current targets are unsigned [0, 1) — plus
+an assignment rule where neighbourhoods from nearby holes overlap, and a matching change
+to the loss mask and its normalisation.
+
+So: a promising later ablation, not a design change to slip in. Pinned in
+tests/test_decode.py::test_copying_geometry_outward_rescues_radius_but_not_centre.
+
+Until then: when training starts, always inspect predicted peak location and sampled
+geometry together. A good heatmap does not imply good decoded circles.
+
+## Phase 5.7 results — the stride question, settled with evidence
+
+**Merge rate, measured by decoding rather than estimated from proximity.** Encode the real
+labels, break exact ties with 1% multiplicative jitter (a trained model never ties), decode
+the whole train split, compare against the peaks the encoder produced:
+
+    dataset  stride   collision   merge
+    v30        4        0.05%     0.30%
+    v30        2        0.02%     0.00%
+    rchsr      4        0.19%     4.37%
+    rchsr      2        0.01%     0.61%
+
+Stride 2 recovers about **3.9 points** on rchsr (4.56% lost -> 0.62%) and 0.3 on v30.
+Not the 11.74% the plan first claimed, nor the 6.23% proximity estimate that replaced it:
+a Euclidean distance threshold is not the suppression condition, which depends on grid
+alignment and relative peak heights. Reproduce with `merge_rate()` in inspect_codec.py.
+
+Still an upper bound on quality — the heatmaps are ideal apart from the tie-break.
+
+**A cost we had not considered: on this noise model, the finer grid produces more false
+peaks.** Additive i.i.d. Gaussian noise on the heatmap *probabilities*, clipped to [0, 1],
+same sigma at both strides, 13 real holes on the densest v30 image:
+
+    sigma    stride 4 detections   stride 2 detections
+     0.02           13                    14
+     0.05           13                    17
+     0.10           47                   199
+
+The ratio is not a constant 4x — it is 1.1x at sigma 0.02 and 4.2x at 0.10 — and the
+result is specific to this noise model. Real model error is neither i.i.d. nor applied to
+probabilities, and clipping at 1.0 creates plateaus that decode keeps as ties: 199
+detections clipped versus 187 unclipped at sigma 0.10.
+
+Supported conclusion: calibrate SCORE_THRESHOLD separately per stride and watch false
+positives, not only recall. NOT supported: raising the stride-2 threshold pre-emptively
+before seeing a trained model's precision-recall behaviour.
+
+Net: stride 2 is still justified on rchsr and marginal on v30, and developing at stride 4
+remains the right call for iteration speed — but on measured merge rates, not on an
+unmeasured rescue rate.
 
 ## Risks / difficulties
 - Heatmaps relocate the merge failure, they do not remove it. Two centers in one stride-4

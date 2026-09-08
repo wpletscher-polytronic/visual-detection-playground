@@ -9,7 +9,7 @@ Functions / classes
   take (w, h) from the decoded array rather than re-reading the header with PIL.
 
 - class BulletHoleDataset(torch.utils.data.Dataset)
-    __init__(root, split, img_size, transforms=None)
+    __init__(root, split, img_size=params.IMG_SIZE, transforms=None)
         split in {'train', 'valid', 'test'} — note the folder is 'valid', the yaml key 'val'.
     __len__() -> int
     __getitem__(i) -> dict:

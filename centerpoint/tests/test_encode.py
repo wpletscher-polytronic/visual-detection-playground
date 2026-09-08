@@ -7,10 +7,11 @@ at the encoder and nothing else.
 import numpy as np
 import pytest
 
-from centerpoint.codec.encode import STRIDE, encode, sigma_for
+from centerpoint.codec.encode import encode, sigma_for
+from centerpoint.params import IMG_SIZE as IMG, STRIDE
 
-IMG = 640
 N = IMG // STRIDE
+CELL = float(STRIDE)          # one cell, in pixels — separations are written in these
 
 
 def test_shapes_and_dtypes():
@@ -53,7 +54,8 @@ def test_radius_is_stored_in_cells():
     # Arrays are indexed [row, col] = [y, x]. Writing these the wrong way round is the
     # single easiest bug to introduce here, so spell both out.
     ix, iy = int(cx / STRIDE), int(cy / STRIDE)
-    assert (ix, iy) == (50, 100)
+    assert ix * STRIDE <= cx < (ix + 1) * STRIDE      # ix really is the column of cx
+    assert iy * STRIDE <= cy < (iy + 1) * STRIDE
     assert t['radius'][0, iy, ix] == pytest.approx(r / STRIDE)
     assert t['radius'][0, ix, iy] == 0.0, "transposed index must NOT also hold the value"
 
@@ -76,14 +78,15 @@ def test_peak_count_equals_hole_count_when_cells_differ():
 
 def test_two_centres_in_one_cell_collide_to_a_single_peak():
     """The hard limit. Measured at 0.01% of holes at stride 2 — real but negligible."""
-    holes = np.array([[100.0, 100.0, 5.0], [100.5, 100.5, 5.0]])   # same cell at stride 2
+    base = 5 * CELL + 0.1 * CELL                    # safely inside one cell
+    holes = np.array([[base, base, 5.0], [base + 0.5 * CELL, base + 0.5 * CELL, 5.0]])
     t = encode(holes, IMG)
     assert (t['heatmap'][0] == 1.0).sum() == 1
     assert t['mask'].sum() == 1
 
 
 def test_overlapping_gaussians_take_maximum_not_sum():
-    holes = np.array([[100.0, 100.0, 5.0], [102.0, 100.0, 5.0]])   # adjacent cells
+    holes = np.array([[100.0, 100.0, 5.0], [100.0 + CELL, 100.0, 5.0]])  # adjacent cells
     hm = encode(holes, IMG)['heatmap']
     assert hm.max() <= 1.0, "summing would push overlapping bumps above 1.0"
 
@@ -158,10 +161,11 @@ def test_no_holes_gives_all_zero_targets():
 
 def test_sigma_never_falls_below_one_cell():
     assert sigma_for(0.0) == 1.0
-    assert sigma_for(0.5) == 1.0        # a 1 px radius hole at stride 2
+    assert sigma_for(0.5) == 1.0        # half a cell of radius
     assert sigma_for(10.0) > 1.0        # large holes scale up
 
 
+@pytest.mark.skipif(STRIDE == 1, reason="every size divides by 1; nothing to reject")
 def test_img_size_must_divide_by_stride():
     with pytest.raises(AssertionError):
-        encode(np.zeros((0, 3)), 641)
+        encode(np.zeros((0, 3)), IMG + 1)

@@ -5,9 +5,11 @@ offset and radius are only meaningful where mask is 1.
 
 import numpy as np
 
-STRIDE = 2          # 320x320 grid for a 640 px image
+from centerpoint.params import STRIDE
+
 SIGMA_SCALE = 0.5   # sigma = SIGMA_SCALE * radius_cells, floored at SIGMA_MIN
-SIGMA_MIN = 1.0     # below one cell the bump is a lone pixel with no gradient to descend
+SIGMA_MIN = 1.0     # below one cell there is no penalty reduction around a centre, so a
+                    # near miss is punished like a false positive in empty space
 TRUNCATE = 3.0      # splat this many sigma; past it the bump is under 0.011
 
 

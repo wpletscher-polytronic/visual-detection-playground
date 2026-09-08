@@ -1,6 +1,6 @@
 """STEP 1 — measure the data before choosing stride and sigma. Labels only, no model.
 
-Numpy and cv2 only, no torch and no GPU. Paths come from config.py, image/label
+Numpy and cv2 only, no torch and no GPU. Paths come from paths.py, image/label
 pairing and parsing from data/splits.py and data/labels.py.
 
 What this decides, and why it has to come first:
@@ -34,7 +34,7 @@ import numpy as np
 if __package__ in (None, ''):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from centerpoint.config import DATASET, debug_dir  # noqa: E402
+from centerpoint.paths import DATASET, debug_dir  # noqa: E402
 from centerpoint.data.splits import load_split_geometry          # noqa: E402
 
 

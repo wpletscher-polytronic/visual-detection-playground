@@ -4,9 +4,10 @@ import numpy as np
 import pytest
 
 from centerpoint.codec.decode import decode, local_maxima
-from centerpoint.codec.encode import STRIDE, encode
+from centerpoint.codec.encode import encode
+from centerpoint.params import IMG_SIZE as IMG, STRIDE
 
-IMG = 640
+CELL = float(STRIDE)          # one cell, in pixels
 
 
 def test_flat_background_produces_no_peaks():
@@ -50,6 +51,7 @@ def test_roundtrip_recovers_centres_and_radii():
     assert got[:, 2] == pytest.approx(want[:, 2], abs=1e-4)
 
 
+@pytest.mark.skipif(STRIDE == 1, reason="cells and pixels coincide, so nothing to confuse")
 def test_output_is_in_image_pixels_not_cells():
     """The likeliest unit bug in the project: forgetting to multiply by stride."""
     t = encode(np.array([[100.0, 200.0, 6.0]]), IMG)
@@ -101,7 +103,8 @@ def test_no_holes_gives_an_empty_result_not_a_crash():
 def test_overlapping_detections_both_survive():
     """The project's whole premise: no suppression by overlap. Two holes 6 px apart have
     heavily overlapping circles, and both must come out."""
-    holes = np.array([[100.0, 100.0, 8.0], [106.0, 100.0, 8.0]])
+    gap = 3 * CELL                                  # far enough apart to stay two peaks
+    holes = np.array([[100.0, 100.0, gap], [100.0 + gap, 100.0, gap]])
     t = encode(holes, IMG)
     got = decode(t['heatmap'], t['offset'], t['radius'])
     assert len(got) == 2
@@ -116,3 +119,68 @@ def test_dense_real_scale_image_decodes_every_hole():
     t = encode(holes, IMG)
     peaks = int((t['heatmap'][0] == 1.0).sum())     # fewer than 125 if any cells collided
     assert len(decode(t['heatmap'], t['offset'], t['radius'])) == peaks
+
+
+# --- behaviour under imperfect maps, which the round-trip tests above cannot see ---
+
+def test_peak_one_cell_off_destroys_the_radius():
+    """The near-miss problem, pinned. offset and radius are written ONLY at the true
+    centre cell, so a peak one cell away reads geometry that was never supervised. The
+    heatmap can be nearly right and the decoded radius still be nonsense."""
+    cx, cy, r = 100.0, 200.0, 9.0
+    t = encode(np.array([[cx, cy, r]]), IMG)
+    col, row = int(cx / STRIDE), int(cy / STRIDE)
+
+    assert t['radius'][0, row, col] == pytest.approx(r / STRIDE)
+    assert t['radius'][0, row, col + 1] == 0.0, "the neighbour was never supervised"
+
+    # Roll the whole bump one cell right: a controlled displacement, where the peak moves
+    # and its shape does not. Poking individual cells instead leaves the Gaussian ring
+    # around the true centre higher than the poked values, which tests something else
+    # (an irregular heatmap) rather than a clean displacement.
+    shifted = np.roll(t['heatmap'], 1, axis=2)
+    got = decode(shifted, t['offset'], t['radius'])
+
+    assert len(got) == 1
+    assert got[0, 2] == pytest.approx(0.0), "radius decodes to zero, not to r"
+
+
+def test_copying_geometry_outward_rescues_radius_but_not_centre():
+    """A partial fix, and the trap in it.
+
+    Copying each centre's radius into a 3x3 block does make the radius survive a one-cell
+    peak error. Copying the *offset* does not work the same way: an offset is measured
+    from its own cell, so cell col+1 needs `x - (col+1)`, not `x - col`. Copying the
+    original value decodes a centre one whole cell out — worse than not spreading, since
+    without it the offset reads 0 and lands on the cell centre.
+
+    Any real implementation therefore needs signed offsets recomputed per cell, plus an
+    assignment rule where neighbourhoods overlap. Not done here; this pins the trap."""
+    cx, cy, r = 100.5, 200.0, 9.0
+    t = encode(np.array([[cx, cy, r]]), IMG)
+    col, row = int(cx / STRIDE), int(cy / STRIDE)
+
+    plain = decode(np.roll(t['heatmap'], 1, axis=2), t['offset'], t['radius'])
+
+    for key, ch in (('radius', 0), ('offset', 0), ('offset', 1)):
+        t[key][ch, row - 1:row + 2, col - 1:col + 2] = t[key][ch, row, col]
+    copied = decode(np.roll(t['heatmap'], 1, axis=2), t['offset'], t['radius'])
+
+    assert plain[0, 2] == pytest.approx(0.0), "without spreading the radius is lost"
+    assert copied[0, 2] == pytest.approx(r, abs=1e-3), "copying rescues the radius"
+
+    assert abs(copied[0, 0] - cx) > abs(plain[0, 0] - cx), (
+        "copied offsets should make the centre WORSE, not better")
+
+
+@pytest.mark.parametrize('cells, expected', [(1, 1), (2, 2), (3, 2)])
+def test_unequal_adjacent_peaks_merge_at_one_cell(cells, expected):
+    """The realistic merge limit. Ties are kept, but a trained model will not tie: the
+    3x3 window then suppresses the lower of any pair within one cell. This, not the
+    equal-peak case, is what sets the minimum resolvable separation."""
+    gap = cells * STRIDE
+    holes = np.array([[200.0, 200.0, 6.0], [200.0 + gap, 200.0, 6.0]])
+    t = encode(holes, IMG)
+    hm = t['heatmap'].copy()
+    hm[0, int(200.0 / STRIDE), int((200.0 + gap) / STRIDE)] *= 0.95
+    assert len(decode(hm, t['offset'], t['radius'])) == expected
