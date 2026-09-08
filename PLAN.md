@@ -1,9 +1,21 @@
 # Center-Point Bullet-Hole Detection — Plan
 
-Goal: heatmap detector predicting (center, radius) per hole, benchmarked head-to-head
-against the YOLO26 baseline on the same split.
+Goal: heatmap detector predicting (center, radius) per hole.
 Approach: own implementation on a torchvision backbone. New code, copied math.
 Learning project, no deadline.
+
+Success criterion: matches the YOLO26 baseline within a reasonable margin on the same
+split, is fully understood line by line, and carries no AGPL dependency.
+Explicitly NOT "beats YOLO on dense clusters" — see Motivation.
+
+## Motivation
+- Learning. The point is to understand every part, not to ship the best number.
+- Licensing. `ultralytics` is **AGPL-3.0** (verified in the installed metadata). Copyleft
+  reaches a whole network-facing service, so shipping it commercially needs a paid licence.
+  torchvision is BSD; CenterNet and CircleNet are MIT. An own implementation sidesteps this.
+  Consequence: never paste AGPL code in, and keep the MIT attribution notice on anything
+  derived from the reference implementations.
+- NOT because NMS demonstrably fails. That diagnosis was dropped unmeasured (see Phases).
 
 ## Environment (verified, not assumed)
 - torch 2.14.0+xpu, torchvision 0.29.0. `torch.cuda.is_available()` is **False**.
@@ -11,7 +23,9 @@ Learning project, no deadline.
 - Local Intel iGPU: overfit tests and encode/decode debugging only.
 - Colab: full runs. Budget ~2-4 h/run (YOLO26 fine-tune was ~1 h, 73 s/epoch x 48).
 - ResNet-18 has `IMAGENET1K_V1` only — no V2. Use `.DEFAULT`.
-- Data: reuse `bullet_rchsr` clean split unchanged. ~3.3k images, ~60k hole instances.
+- Data: `bullet_holes/clean_v30` for bring-up (easy, YOLO26 hit 99.3% there, so a low
+  score means a bug), `bullet_rchsr/clean` as the target set and the only source of
+  stride/sigma — never tune on v30. Both are placeholders for our own data later.
 - No new labeling required. Boxes -> `(cx, cy)`, `r = max(w,h)/2`.
 
 ## Implementation tiers
@@ -23,31 +37,122 @@ Tier 1 — use as-is, never implement:
 - TensorBoard, checkpointing, config
 
 Tier 2 — write every line yourself (~250 lines, the whole intellectual content):
-- target encoding: Gaussian splat + sub-pixel offset + radius targets
-- losses: penalty-reduced focal (alpha=2, beta=4) + masked L1
-- decode: 3x3 max-pool peaks, top-k, threshold, offset, radius
-- heads (3x conv-relu-conv) and the stride-32 -> stride-4 decoder
-- the eval matching criterion (defines what "correct" means; ~20 lines)
+- target encoding, losses, decode, heads and decoder, the eval matching criterion.
+- Per-file TODOs in `centerpoint/` carry the signatures, invariants and open choices.
 
 Tier 3 — delegate:
 - dataset wrapper, training loop, eval harness plumbing, visualisation, Colab notebook
 
 ## Phases
-0. Baseline diagnosis — raise `IOU` 0.30 -> 0.7 in `8_yolo26_detection.py`, dump pre-NMS
-   boxes on cluster cases, record how much failure NMS actually causes.
-1. Scaffold + failing unit tests. Tier 3 written, Tier 2 stubbed with equations in docstrings.
-2. Target encoding. Render encoded heatmap over source image; verify by eye.
-3. Model: ResNet-18 + plain transposed-conv decoder + heatmap/offset heads. Shapes only.
-4. Losses. **Overfit 8 images to near-zero loss.** Hard gate — nothing downstream works if this doesn't.
-5. Decode + visualisation. Confirm the 8 overfit images round-trip to the right points.
-6. First full training run. Point metrics only, no radius yet.
-7. Radius head. L1, lambda ~0.1. Switch on cIoU-AP.
-8. Eval harness + YOLO26 comparison, overall and on the dense/overlapping subset.
-9. Backbone ladder: plain decoder -> U-Net skips from layer1/2/3 -> HRNet-W18 (timm).
-   Three points on a curve, one change at a time.
-10. Write results into `INFO.md` section 9.
 
-Phases 1-5 are one or two sittings and need no meaningful GPU time.
+0. ~~Baseline NMS diagnosis~~ — **dropped**, unmeasured. Motivation is learning plus
+   licensing, not a demonstrated NMS failure. Consequence: we never established how much
+   of the cluster failure NMS caused, so no claim may be made about it.
+1. ~~**Measure the data first.**~~ **DONE** — `centerpoint/analyze_labels.py`,
+   results in `centerpoint/outputs/debug/label_stats/<dataset>/stats.json`.
+   See "Step 1 results" below.
+2. Config + dataset. Boxes -> (center, radius), same splits as the baseline.
+3. ~~Target encoding.~~ **DONE** — `codec/encode.py`, 18 tests green.
+4. Decode. Steps 1-4 need numpy and cv2 only — no torch, no GPU.
+5. Model: backbone + decoder + heads. Shapes and sanity only.
+6. Losses, then **overfit 8 images to near-zero loss**. Hard gate.
+7. First full training run. Point metrics only, no radius yet.
+8. Radius head.
+9. Eval harness + YOLO26 comparison — as a **bug detector**, not a competition. Scoring far
+   below the baseline means a defect in encode/decode, not a paradigm difference.
+10. Backbone ladder: plain decoder -> U-Net skips -> HRNet-W18 (timm). One change at a time.
+11. Write results into `INFO.md` section 9.
+
+Steps 1-4 are one or two sittings and need no GPU.
+
+## Optional / future — Boundary refinement (do not build yet)
+
+Gated on the core center+radius detector working and being measured first.
+
+Idea: per hole, refine the circle to the real torn boundary by seeded region growing —
+seed = detected center, growth capped by that hole's own predicted circle, each hole
+grown independently so refined boundaries may overlap.
+
+### Verified
+- Adams & Bischof, "Seeded Region Growing", IEEE PAMI 16, 641-647, 1994. Citation correct.
+- Liu et al., "Overlapping Bullet Hole Detection Based on Improved Watershed", ICSIP 2023,
+  pp. 136-140. Exists; contents not retrieved.
+- Independent-growth-allows-overlap vs watershed-forces-disjoint is a real, documented
+  distinction, not a rationalisation. Watershed partitions by construction.
+- `cv2.floodFill`'s mask argument does encode the circular constraint directly.
+
+### Challenges — read before committing to this
+- **The scoring rule may not want shape at all.** ISSF scores with a plug gauge of nominal
+  calibre seated in the hole; a shot reaches a ring when its *centre* is within
+  ring radius + 2.25 mm (4.5 mm pellet). CMP and NSRA are gauge-based too. So the official
+  rule is literally center + fixed known radius, and explicitly ignores the ragged tear.
+  Refining to the true boundary moves *away* from the rule. Settle which rule set the
+  internship targets use before building anything here.
+- **The boundary is unobservable exactly where it is wanted.** Where two holes merge, the
+  paper between them is gone — there is no image evidence of hole A's edge inside the
+  overlap. Growth just floods to the circle cap, so in the overlap region the output is
+  100% the predicted circle and 0% refinement. The stated motivation names the one region
+  the method cannot help with.
+- **The cap contradicts the motivation.** Growth can only ever shrink the circle, never
+  exceed it. Torn paper between close holes typically bulges *outside* a clean circle —
+  the constraint clips precisely the deviation being chased. This is erosion-only refinement.
+- **Unfalsifiable with current labels.** Boxes only, no polygon/mask GT. Nothing to score a
+  refined boundary against without new annotation.
+- **Polarity returns.** `floodFill` grows on raw intensity via loDiff/upDiff — the exact
+  assumption that broke scripts 1-3 (holes are not consistently darker or lighter). Any
+  growth criterion must run on the contrast residual (script 4) or a learned feature.
+- **Wrong term to optimise.** Radius GT is `max(w,h)/2` from boxes and is coarse. Refining
+  shape while the scale estimate is sloppy is polish on top of noise.
+- **No downstream consumer for the overlap.** Scoring needs per-hole center and size.
+  Overlapping masks are philosophically correct but currently change no output.
+
+### Alternatives, if shape does turn out to matter
+- SAM point prompt — independent masks, overlap by construction, zero training. But
+  documented point-prompt coordinate bias on small objects, leaking into adjacent regions
+  near edges, high sensitivity to exact prompt location, SAM2 weak on fine detail.
+  Cheaper first probe than region growing; apply the circle as a post-hoc mask.
+- Mask R-CNN style per-ROI masks — overlap by construction, but needs mask annotations.
+- BCNet, "Occlusion-Aware Instance Segmentation with Overlapping BiLayers" (arXiv 2103.12340)
+  — explicitly models overlapping object pairs in two layers.
+- Amodal instance segmentation — the correct frame for the invisible part. AISDiff
+  (arXiv 2409.18256), ShapeMoE (arXiv 2508.01664), AURA (ICCV 2025). All need amodal GT and
+  a learned shape prior; classical region growing cannot do this.
+- Concave-point detection + ellipse fitting (arXiv 2008.00997) — classical, works on the
+  outer contour of a merged blob. Better classical fit than region growing, but partitions.
+
+### Open questions before this phase is worth starting
+- Which scoring rule set applies? If gauge-based, is this phase needed at all?
+- Measure first: on ~20 hard cases, how far does the fitted circle actually sit from a
+  hand-drawn boundary, and would any of those deviations change a ring call?
+- Is refinement wanted on the outer (visible, ring-facing) edge only? That is a much
+  smaller, better-posed problem than full boundary recovery.
+
+## Step 1 results (measured, train split: 3101 images, 58533 holes)
+
+Reproduce with `python -m centerpoint.analyze_labels`.
+
+- Every image is already 640x640. No resize or letterbox decision needed.
+- Radius px, p1/p5/p25/p50/p75/p95/p99: `1.0 2.0 3.0 5.5 7.75 12.0 17.0`
+  - at stride 4 that is `0.25 0.50 0.75 1.38 1.94 3.00 4.25` cells
+  - at stride 2, `0.50 1.00 1.50 2.75 3.88 6.00 8.50` cells
+- Nearest-neighbour centre distance px, p1/p5/p25/p50/p75: `3.6 5.4 12.1 20.1 34.2`
+- Hard limit (two centres in one cell): stride 4 = **0.19%**, stride 2 = **0.01%**.
+  CenterNet on COCO was 0.07%.
+- Soft limit (neighbour within N cells, where peaks flatten into one):
+  - stride 4: <1 cell 1.45%, <2 cells **11.74%**, <3 cells 24.41%
+  - stride 2: <1 cell 0.03%, <2 cells 1.45%, <3 cells 6.23%
+- Boxes are not square: aspect p50 1.21, p95 2.0. `r = max(w,h)/2` overestimates.
+- valid and test agree with train, so the splits are consistent.
+
+What this means
+- The collision number understates the risk by roughly 60x. At stride 4, 11.7% of holes
+  have a neighbour within 2 cells and would merge under any sigma large enough to train.
+  Stride 2 cuts that to 1.45%. The hard limit was never the binding constraint.
+- Holes are small: a quarter are under 0.75 cells radius at stride 4. Sigma would have to
+  be ~1 cell, which a heatmap can barely represent.
+- Evidence leans stride 2. Cost is 4x head memory (320x320 vs 160x160). Still your call.
+- Radius p1 is 1 px and p5 is 2 px — a 2 px-diameter hole at 640x640 may be annotation
+  noise. Overlays confirm the parse is right, so these are real labels, not a bug.
 
 ## Unit tests to write first (they are the learning device)
 - encode a known point/radius -> argmax at that pixel, value exactly 1.0
@@ -57,6 +162,7 @@ Phases 1-5 are one or two sittings and need no meaningful GPU time.
 - focal loss ~0 on a perfect prediction, large on an inverted one
 
 ## Decided
+- Success is parity with the baseline plus full understanding and no AGPL, not a win.
 - Heatmap/CenterNet-style, not P2PNet set prediction. Debuggable, and has a radius head.
 - Own implementation. Read the references, fork nothing.
 - Pretrained ImageNet backbone; never train a backbone from scratch on 3.3k images.
@@ -64,17 +170,37 @@ Phases 1-5 are one or two sittings and need no meaningful GPU time.
 - Modernize the scaffolding (AMP, AdamW + cosine, albumentations, no DCN compilation).
   Do NOT modernize the math until a faithful baseline trains.
 
+## Decided at Step 3 (constants live in `codec/encode.py`)
+- **Stride 2.** Holes with a neighbour within 2 cells: 11.74% at stride 4, 1.45% at
+  stride 2. Radius p25 goes 0.75 -> 1.50 cells. Costs 4x head memory (320x320 grid).
+- **`sigma = max(0.5 * radius_cells, 1.0)`.** Follows hole size but never below one cell:
+  a sub-cell Gaussian is a lone lit pixel with no falloff, and the focal loss `(1-Y)^beta`
+  term exists precisely to exploit that falloff. The 0.5 is sweepable; the floor is not.
+- **Radius stored in cells** (`r / stride`), so centres, offsets and radii share one
+  coordinate system and decode is a single multiply by stride for all three.
+- **Splat is windowed to 3 sigma.** Measured: full-grid costs 44.8 ms/image at stride 2
+  (139 s/epoch), windowed 0.22 ms. Same result to within 5e-3 (pure truncation).
+
+## The merge limit is a DECODE problem, not an encode one
+Measured, and it corrects the original brief. Element-wise maximum means two centres in
+different cells always produce two cells at exactly 1.0, at any separation — nothing
+merges in the encoder. What varies is whether a dip exists *between* them:
+- same cell: one peak. Unavoidable, 0.01% of holes at stride 2.
+- 1 cell apart: two 1.0 cells, **no cell between them**, i.e. a flat 2-cell plateau.
+- 2+ cells apart: a real valley (0.73 at 2 cells, 0.28 at 4).
+
+So ~1.4% of holes at stride 2 land in the plateau regime, and whether those decode as one
+detection or two is decided entirely by the plateau rule in `codec/decode.py`. That rule
+is now the single most important decision left.
+
 ## Open decisions — yours, not mine
-- Heatmap sigma: CenterNet's IoU-derived `gaussian_radius`, or simply proportional to
-  hole radius. The latter is simpler and better matched to circular objects — but decide
-  it deliberately and write down why.
-- Radius representation: raw px, log-radius, or fraction of image size.
+- **Plateau rule in decode**: on a tie between adjacent cells, keep all or keep one.
+  Directly sets whether the ~1.4% plateau cases become one detection or two.
 - Radius loss: L1 (CircleNet), smooth-L1, or a cIoU/gCIoU regression loss.
-- Output stride: 4 (standard) vs 2 (better peak separation, 4x memory).
 - Match threshold for the point metric: absolute px, fraction of GT radius, or k-NN
   normalised (nAP). This defines what "correct" means for the whole project.
 - Ellipse vs circle for perspective-distorted holes.
-- Input handling: full 640px images, or crops at native resolution.
+- Whether to filter tiny boxes (p1 radius 1 px, p5 2 px).
 
 ## Risks / difficulties
 - Heatmaps relocate the merge failure, they do not remove it. Two centers in one stride-4

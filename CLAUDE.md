@@ -13,6 +13,25 @@ Bullet-hole detection for shooting targets. Two projects, one repo.
   It is the user's own lab notebook.
 - Do not commit or push unless asked.
 
+## Code style
+
+Comments and docstrings:
+- Explain **why**, never what. The code already says what it does.
+- Prefer a better name over a comment. A comment that restates the line is a liability:
+  it has to be maintained, and a stale comment is worse than none.
+- Design rationale and measurements belong in `PLAN.md`, not copied into the code.
+  Two copies means one rots, and it will be the one in the code. Point at it instead.
+- Docstrings on public functions: one summary line, then Args/Returns/Raises only where
+  they are not obvious from the signature. Short obvious helpers need none.
+- A comment earns its place if it records a decision, a trap, or a constraint a reader
+  could not recover from the code.
+
+Code:
+- Split a dense line into two named steps rather than golfing it, unless that means
+  replacing a vectorised numpy operation with a Python loop over elements.
+  A short loop over whole-array numpy calls is fine.
+- Name intermediate values. `dist_sq = ...` beats a comment explaining the expression.
+
 ## Environment
 
 - venv at repo root: `venv/Scripts/python.exe`. Rebuild:
@@ -41,5 +60,8 @@ Bullet-hole detection for shooting targets. Two projects, one repo.
 ## Running
 
 - Tests: `python -m pytest` from repo root (the `-m` puts cwd on `sys.path`).
-- Scripts are run from repo root, so paths in them are repo-root-relative.
+- `Playground/` scripts use cwd-relative paths, so run them from the repo root.
+- `centerpoint/` entry points anchor paths to the repo root via `__file__` and
+  bootstrap `sys.path` when run directly, so both `python -m centerpoint.x` and
+  `python centerpoint/x.py` work from any cwd. Keep new entry points doing this.
 - `centerpoint/outputs/` is gitignored — checkpoints, heatmap dumps, eval results.
