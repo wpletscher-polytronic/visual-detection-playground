@@ -244,3 +244,29 @@ def test_detector_rejects_sizes_the_ladder_cannot_handle(skips):
 def test_input_size_from_params_is_accepted():
     net = CenterPointNet(out_stride=4, pretrained=False)
     assert IMG_SIZE % 32 == 0, "the pipeline size must satisfy the neck's contract"
+
+
+def test_stride_must_be_passed_explicitly():
+    """No default: the model owns out_stride, and falling back to params.STRIDE would
+    decode a stride-2 model at stride 4 with every coordinate doubled and no error."""
+    outputs = {'heatmap': torch.zeros(1, 1, 8, 8),
+               'offset': torch.zeros(1, 2, 8, 8),
+               'radius': torch.zeros(1, 1, 8, 8)}
+    with pytest.raises(TypeError):
+        detections_from(outputs)
+
+
+@pytest.mark.parametrize('dtype', [torch.float32, torch.float16, torch.bfloat16])
+def test_mixed_precision_outputs_reach_the_decoder_as_float32(dtype):
+    """bfloat16 has no numpy equivalent and raises on .numpy(); float16 would survive as
+    float16 and then meet float32 arrays inside decode. The boundary casts, so the model's
+    own training precision is free to be whatever it likes."""
+    outputs = {'heatmap': torch.full((1, 1, 8, 8), -5.0, dtype=dtype),
+               'offset': torch.zeros(1, 2, 8, 8, dtype=dtype),
+               'radius': torch.ones(1, 1, 8, 8, dtype=dtype)}
+    outputs['heatmap'][0, 0, 4, 4] = 5.0
+
+    dets = detections_from(outputs, stride=4, threshold=0.3)
+    assert dets.dtype == np.float32
+    assert len(dets) == 1
+    assert dets[0, :2] == pytest.approx([16.0, 16.0])       # cell (4, 4) at stride 4

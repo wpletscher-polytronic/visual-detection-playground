@@ -59,14 +59,17 @@ Tier 3 — delegate:
 3. ~~Target encoding.~~ **DONE** — `codec/encode.py`.
 4. ~~Decode.~~ **DONE** — `codec/decode.py`. 34 tests, green at strides 1 to 20.
    Steps 1-4 are numpy and cv2 only — no torch, no GPU.
-5. Model: backbone + neck + heads. Shapes and sanity only. See "Step 5 design" below.
+5. ~~Model: backbone + neck + heads.~~ **DONE** — `model/backbone.py`, `neck.py`,
+   `heads.py`, `detector.py`. Shapes and sanity only, no training. See "Step 5 design"
+   for the choices and "Step 5 results" for what they cost.
 5.5 Dataset + collate, once training needs batches of real images.
 5.7 ~~**Perturbation tests before any training.**~~ **DONE** — see results below. Every check so far uses ideal targets,
    where the peak is always in the right cell. Feed decode heatmaps with unequal peaks,
    sub-cell shifts and noise, and see what survives. This is the only way to learn what
    the decoder does with realistic input, and it settles the stride question properly.
 6. Losses, then **overfit 8 images to near-zero loss**. Hard gate.
-7. First full training run. Point metrics only, no radius yet.
+7. First full training run. Point metrics only, no radius yet. Save `out_stride`
+   alongside the weights — it is needed to construct the model before loading.
 8. Radius head.
 9. Eval harness + YOLO26 comparison — a **signal**, not an oracle. A large gap is a reason
    to go looking, but initialisation, training recipe, capacity, augmentation and label
@@ -253,6 +256,31 @@ think about, not just the stride.
   statistics is an experiment to run if needed, not a default. Gradient accumulation does
   not help — BN never sees the larger batch.
 - Backbone forward at 640x640 on this machine's XPU: 32 ms.
+
+## Step 5 results (measured, batch 8 at 640x640, forward only, eval mode, this XPU)
+
+62 tests green. Numbers stable to ~3% across repeat runs; memory is deterministic.
+
+- **Stride 4 -> 2 costs the whole model +22% time and +62% memory** (223 -> 273 ms,
+  603 -> 976 MiB). The 4x figures elsewhere in this plan describe the output map alone and
+  still hold — the model total is dominated by the backbone, which the stride never
+  changes. Budget from this number, not from the 4x.
+- **The skip neck costs +3% time at stride 4, +6% at stride 2, and 55,648 parameters**
+  (11,667,140 -> 11,722,788). Cheap enough to be the default; `skips=False` survives only
+  as the Step 10 ablation, and it does not shrink the backbone.
+- **Why skips are not optional on the target data: 25.9% of rchsr train holes cannot be
+  told apart at C5** (stride 32) — they sit in a cell with another centre, so all but one
+  of each group is unrecoverable from C5 alone. v30 is 3.8%. Reproduce by flooring centres
+  by 32 and summing `count - 1` per occupied cell.
+
+**Trap, found in review.** A dummy forward inside `Backbone.__init__` to probe channel
+widths corrupts the pretrained BatchNorm statistics: `no_grad` does not stop BN updating
+its running mean and variance, only `eval()` does. One probe batch moved C5's eval-mode
+output by 73%. Widths are now stated literally instead of probed.
+
+**`detections_from(outputs, stride, ...)` takes `stride` with no default**, deliberately.
+Defaulting to `params.STRIDE` would silently decode a stride-2 model at stride 4, putting
+every centre and radius out by exactly 2x with nothing raised. Pass `net.out_stride`.
 
 ## The near-miss geometry problem (found in review, not yet addressed)
 

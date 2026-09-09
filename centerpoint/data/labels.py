@@ -24,6 +24,11 @@ def load_yolo_labels(path, img_w, img_h):
 
     An empty label file is legal (an image with no holes) and returns shape (0, 3),
     never None — callers should not have to special-case it.
+
+    Centres must be strictly inside the image, matching codec/encode.py: one sitting at
+    exactly the width has no cell to floor into. The bound is checked on the float32
+    value because that is what data/dataset.py converts to before encoding — a float64
+    centre a hair inside the edge can round up to exactly the width and pass otherwise.
     """
     rows = []
     with open(path) as handle:
@@ -34,11 +39,20 @@ def load_yolo_labels(path, img_w, img_h):
             if len(parts) != 5:
                 raise ValueError(f"{path}:{line_no}: expected 5 fields, got {len(parts)}")
 
-            _cls, cx, cy, w, h = (float(p) for p in parts)
-            if not (0.0 <= cx <= 1.0 and 0.0 <= cy <= 1.0):
-                raise ValueError(f"{path}:{line_no}: centre {cx},{cy} outside 0..1")
+            values = [float(part) for part in parts]
+            # Checked before anything else: nan fails every comparison below, so a nan
+            # width would slip past `w <= 0.0` and only surface inside encode.
+            if not np.isfinite(values).all():
+                raise ValueError(f"{path}:{line_no}: non-finite value in {line.strip()!r}")
+
+            _cls, cx, cy, w, h = values
             if w <= 0.0 or h <= 0.0:
                 raise ValueError(f"{path}:{line_no}: non-positive box {w}x{h}")
+
+            centre_x, centre_y = np.float32(cx * img_w), np.float32(cy * img_h)
+            if not (0.0 <= centre_x < img_w and 0.0 <= centre_y < img_h):
+                raise ValueError(f"{path}:{line_no}: centre {cx},{cy} is {centre_x},{centre_y} px, "
+                                 f"not strictly inside {img_w}x{img_h}")
 
             rows.append((cx * img_w, cy * img_h, max(w * img_w, h * img_h) / 2))
 

@@ -25,30 +25,26 @@ class CenterPointNet(nn.Module):
         self.heads = CenterPointHeads(self.neck.out_channels)
 
     def forward(self, images):
-        # The neck upsamples by exactly 2 per step, which only lines up with the backbone
-        # levels when both sides divide by 32. Off-size input either raises inside the
-        # neck (with skips) or silently returns the wrong output stride (without them).
+        # Off-size input misaligns the neck's ladder; neck.py has the failure modes.
         height, width = images.shape[-2:]
         assert height % 32 == 0 and width % 32 == 0, (
             f"input {height}x{width} must be divisible by 32")
         return self.heads(self.neck(self.backbone(images)))
 
 
-def detections_from(outputs, index=0, stride=STRIDE, threshold=SCORE_THRESHOLD):
+def detections_from(outputs, stride, index=0, threshold=SCORE_THRESHOLD):
     """One image's model outputs -> the (m, 4) array decode returns.
 
-    Deliberately NOT part of forward. Four things happen here that must not sit in the
-    differentiable path: the heatmap sigmoid is applied (exactly once — the heads emit
-    logits and the loss will apply its own), the radius is clamped, gradients are dropped,
-    and the tensors cross to numpy because decode is numpy.
+    `stride` has no default: falling back to params.STRIDE would silently decode a
+    stride-2 model at stride 4. Pass net.out_stride.
 
-    The radius clamp is the negative-radius policy. The head is linear so it can and does
-    emit negatives — about 25% of cells at random init — and keeping it linear is what
-    stops a ReLU unit dying. Training therefore sees the raw prediction and a signed L1
-    error, while a caller asking for detections gets a circle it can actually draw.
+    Outside forward because training needs the raw predictions, not because sigmoid and
+    clamp are non-differentiable — they are. Sigmoid runs once here (the heads emit
+    logits, the loss applies its own), clamp makes the circle drawable, float32 because
+    decode is numpy and bfloat16 has no numpy dtype.
     """
     with torch.no_grad():
-        heatmap = torch.sigmoid(outputs['heatmap'][index]).detach().cpu().numpy()
-        offset = outputs['offset'][index].detach().cpu().numpy()
-        radius = outputs['radius'][index].clamp(min=0.0).detach().cpu().numpy()
+        heatmap = torch.sigmoid(outputs['heatmap'][index]).float().cpu().numpy()
+        offset = outputs['offset'][index].float().cpu().numpy()
+        radius = outputs['radius'][index].clamp(min=0.0).float().cpu().numpy()
     return decode(heatmap, offset, radius, stride=stride, threshold=threshold)
