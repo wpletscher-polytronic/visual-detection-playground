@@ -40,7 +40,7 @@ from centerpoint.codec.decode import SCORE_THRESHOLD, decode                # no
 from centerpoint.codec.encode import encode                                 # noqa: E402
 from centerpoint.data.dataset import BulletHoleDataset, collate             # noqa: E402
 from centerpoint.inspect_codec import colourise, draw_circles, label        # noqa: E402
-from centerpoint.metrics import match_by_distance                           # noqa: E402
+from centerpoint.metrics import assign_optimal, centre_criterion            # noqa: E402
 from centerpoint.model.detector import CenterPointNet, detections_from      # noqa: E402
 from centerpoint.model.losses import (ALPHA, BETA, LAMBDA_OFFSET,           # noqa: E402
                                       LAMBDA_RADIUS, detection_loss)
@@ -111,7 +111,9 @@ def score_image(holes, detections, tolerance=GATE['centre_tolerance_px']):
 
     holes is the (n, 3) array the Dataset returns, detections the (m, 4) decode produces.
     """
-    matches = match_by_distance(holes[:, :2], detections[:, :2], tolerance)
+    feasible, distances = centre_criterion(holes, detections, tolerance)
+    matches = [(i, j, float(distances[i, j])) for i, j in assign_optimal(feasible, distances)]
+
     matched_gt = {i for i, _j, _d in matches}
     matched_det = {j for _i, j, _d in matches}
 

@@ -22,6 +22,8 @@ Playground/data/models/
 # Third-party papers — not ours to redistribute. RESEARCH.md (ours) is kept.
 Playground/papers/*.pdf
 
+CenterNet
+
 # Stray folder ultralytics' AMP check recreates at repo root on every run
 /weights/
 

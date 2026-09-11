@@ -14,7 +14,8 @@ import textwrap
 import numpy as np
 import pytest
 
-from centerpoint.overfit import (GATE, chunks, gate_verdict, match_by_distance, parse_args,
+from centerpoint.metrics import assign_optimal, centre_criterion
+from centerpoint.overfit import (GATE, chunks, gate_verdict, parse_args,
                                  preflight, score_image, select_indices, source_stem)
 
 TOLERANCE = GATE['centre_tolerance_px']
@@ -22,6 +23,17 @@ TOLERANCE = GATE['centre_tolerance_px']
 # The subprocess regression test starts a fresh interpreter, which has none of pytest's
 # path setup, so it has to be told where the package lives.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def match_by_distance(gt_xy, det_xy, tolerance):
+    """Pairs with their distances, composed from the two functions metrics.py exports.
+
+    metrics.py deliberately does not ship this: it is the shape the gate wants, not a
+    third matching rule, and a convenience wrapper with one caller does not belong in the
+    evaluation contract. score_image composes the same two calls inline.
+    """
+    feasible, distances = centre_criterion(gt_xy, det_xy, tolerance)
+    return [(i, j, float(distances[i, j])) for i, j in assign_optimal(feasible, distances)]
 
 
 def holes(*rows):
@@ -311,16 +323,16 @@ def test_the_hang_case_terminates_in_a_fresh_process():
         import sys
         sys.path.insert(0, {REPO_ROOT!r})
         import numpy as np
-        from centerpoint.overfit import match_by_distance
+        from centerpoint.metrics import assign_optimal, centre_criterion
         gt = np.array([[0.,5.],[3.,9.],[9.,4.],[1.,5.],[9.,8.]])
         det = np.array([[8.,1.],[1.,6.],[2.,4.],[1.,6.],[7.,8.]])
-        assert len(match_by_distance(gt, det, 10.0)) == 5
+        assert len(assign_optimal(*centre_criterion(gt, det, 10.0))) == 5
     """)
     try:
         done = subprocess.run([sys.executable, '-c', source], timeout=60,
                               capture_output=True, text=True)
     except subprocess.TimeoutExpired:
-        pytest.fail("match_by_distance did not terminate within 60 s")
+        pytest.fail("assign_optimal did not terminate within 60 s")
     assert done.returncode == 0, done.stderr
 
 
